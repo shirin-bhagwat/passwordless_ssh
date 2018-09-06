@@ -1,0 +1,52 @@
+---
+- hosts: local_host
+  gather_facts: false
+
+  tasks:
+    - name: find .ssh key file exists or not
+      stat:
+        path: "~/.ssh/{{item}}"
+      register: file_exist
+      with_items:
+        - "{{key_file}}"
+        - "{{key_file}}.pub"
+
+    - name: Generate new ssh key on local machine
+      shell: "ssh-keygen -t rsa -f ~/.ssh/{{key_file}} -P \"\""
+      register: ssh_key_creation
+      failed_when: ssh_key_creation.rc != 0
+      when: file_exist is defined and file_exist.results[0].stat.exists == false and file_exist.results[1].stat.exists == false
+
+
+    - name: check .ssh/config file exists or not
+      stat:
+        path: "~/.ssh/config"
+      register: config_exist
+
+
+    - name: create the ~/.ssh/config file if not exist
+      file:
+        path: "~/.ssh/config"
+        state: touch
+        mode: "7777"
+      register: ssh_config_file_creation
+      when: config_exist is defined and config_exist.stat.exists == false
+
+    - name: add the new ssh key entry to the ~/.ssh/config file
+      lineinfile:
+        path: "~/.ssh/config"
+        line: "IdentityFile ~/.ssh/{{key_file}}"
+        state: present
+        backup: yes
+      register: conf_add
+
+- hosts: local_host
+  gather_facts: false
+  tasks:
+
+    - name: Sending the ssh key to the remote hosts
+      shell: "sshpass -p \"{{remote_server_password}}\" ssh-copy-id -o StrictHostKeyChecking=no -i ~/.ssh/{{key_file}}.pub {{remote_server_username}}@{{item}}"
+      register: ssh_copy_id_execution
+      with_items: 
+        - "{{ groups['server_group']}}"
+      failed_when: ssh_copy_id_execution.rc != 0
